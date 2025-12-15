@@ -41,7 +41,7 @@ def _edit_distance(reference: Sequence[str], hypothesis: Sequence[str]) -> EditC
         [EditCounts(0, j, 0) for j in range(hyp_len + 1)]
     ]
     for i in range(1, ref_len + 1):
-        row = [EditCounts(i, 0, 0)]
+        row = [EditCounts(0, 0, i)]
         row.extend(EditCounts(0, 0, i) for _ in range(hyp_len))
         dp.append(row)
 
