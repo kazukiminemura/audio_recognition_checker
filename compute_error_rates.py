@@ -12,7 +12,7 @@ import argparse
 from dataclasses import dataclass
 from typing import Iterable, List, Sequence, Tuple
 
-from jiwer import measures as jiwer_measures
+from jiwer import cer, measures as jiwer_measures, wer
 
 
 @dataclass
@@ -40,11 +40,11 @@ def _calculate_error_rate_for_lines(
     mode: str,
 ) -> ErrorRateResult:
     if mode == "word":
+        rate = wer(references, hypotheses)
         output = jiwer_measures.process_words(references, hypotheses)
-        rate = output.wer
     elif mode == "char":
+        rate = cer(references, hypotheses)
         output = jiwer_measures.process_characters(references, hypotheses)
-        rate = output.cer
     else:
         raise ValueError(f"Unsupported mode: {mode}")
 
