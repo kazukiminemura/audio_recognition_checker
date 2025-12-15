@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-from typing import Iterable, List, Sequence, Tuple
+from typing import Callable, Iterable, List, Sequence, Tuple
 
 
 @dataclass
@@ -64,35 +64,48 @@ def _edit_distance(reference: Sequence[str], hypothesis: Sequence[str]) -> EditC
     return dp[ref_len][hyp_len]
 
 
+def _calculate_error_rate_for_lines(
+    references: Sequence[str],
+    hypotheses: Sequence[str],
+    tokenizer: Callable[[str], Sequence[str]],
+) -> Tuple[float, EditCounts]:
+    total_counts = EditCounts(0, 0, 0)
+    total_reference_tokens = 0
+    total_hypothesis_tokens = 0
+
+    for reference, hypothesis in zip(references, hypotheses):
+        reference_tokens = tokenizer(reference)
+        hypothesis_tokens = tokenizer(hypothesis)
+        counts = _edit_distance(reference_tokens, hypothesis_tokens)
+        total_counts = _add_counts(
+            total_counts,
+            (counts.substitutions, counts.insertions, counts.deletions),
+        )
+        total_reference_tokens += len(reference_tokens)
+        total_hypothesis_tokens += len(hypothesis_tokens)
+
+    if total_reference_tokens == 0:
+        rate = 0.0 if total_hypothesis_tokens == 0 else 1.0
+    else:
+        rate = total_counts.total_errors / total_reference_tokens
+    return rate, total_counts
+
+
 def calculate_wer(reference: str, hypothesis: str) -> Tuple[float, EditCounts]:
     """Compute WER and edit counts for word-level tokens."""
-    ref_tokens = reference.split()
-    hyp_tokens = hypothesis.split()
-    counts = _edit_distance(ref_tokens, hyp_tokens)
-    if not ref_tokens:
-        rate = 0.0 if not hyp_tokens else 1.0
-    else:
-        rate = counts.total_errors / len(ref_tokens)
-    return rate, counts
+    return _calculate_error_rate_for_lines([reference], [hypothesis], lambda s: s.split())
 
 
 def calculate_cer(reference: str, hypothesis: str) -> Tuple[float, EditCounts]:
     """Compute CER and edit counts for character-level tokens."""
-    ref_tokens = list(reference)
-    hyp_tokens = list(hypothesis)
-    counts = _edit_distance(ref_tokens, hyp_tokens)
-    if not ref_tokens:
-        rate = 0.0 if not hyp_tokens else 1.0
-    else:
-        rate = counts.total_errors / len(ref_tokens)
-    return rate, counts
+    return _calculate_error_rate_for_lines([reference], [hypothesis], list)
 
 
-def _read_input(value: str) -> str:
+def _read_lines(value: str) -> List[str]:
     if value.startswith("@"):
         with open(value[1:], "r", encoding="utf-8") as handle:
-            return handle.read().strip()
-    return value
+            return handle.read().splitlines()
+    return [value]
 
 
 def main(args: Iterable[str] | None = None) -> None:
@@ -107,11 +120,21 @@ def main(args: Iterable[str] | None = None) -> None:
     )
     parsed = parser.parse_args(args=args)
 
-    reference_text = _read_input(parsed.reference)
-    hypothesis_text = _read_input(parsed.hypothesis)
+    reference_lines = _read_lines(parsed.reference)
+    hypothesis_lines = _read_lines(parsed.hypothesis)
 
-    wer, wer_counts = calculate_wer(reference_text, hypothesis_text)
-    cer, cer_counts = calculate_cer(reference_text, hypothesis_text)
+    if len(reference_lines) != len(hypothesis_lines):
+        raise ValueError(
+            "Reference and hypothesis must contain the same number of lines"
+        )
+
+    wer, wer_counts = _calculate_error_rate_for_lines(
+        reference_lines, hypothesis_lines, lambda s: s.split()
+    )
+    cer, cer_counts = _calculate_error_rate_for_lines(reference_lines, hypothesis_lines, list)
+
+    reference_text = "\n".join(reference_lines)
+    hypothesis_text = "\n".join(hypothesis_lines)
 
     print("Reference:", reference_text)
     print("Hypothesis:", hypothesis_text)
