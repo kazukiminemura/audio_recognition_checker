@@ -24,6 +24,14 @@ class EditCounts:
         return self.substitutions + self.insertions + self.deletions
 
 
+@dataclass
+class ErrorRateResult:
+    rate: float
+    counts: EditCounts
+    reference_tokens: int
+    hypothesis_tokens: int
+
+
 def _add_counts(counts: EditCounts, update: Tuple[int, int, int]) -> EditCounts:
     sub, ins, delete = update
     return EditCounts(
@@ -68,7 +76,7 @@ def _calculate_error_rate_for_lines(
     references: Sequence[str],
     hypotheses: Sequence[str],
     tokenizer: Callable[[str], Sequence[str]],
-) -> Tuple[float, EditCounts]:
+) -> ErrorRateResult:
     total_counts = EditCounts(0, 0, 0)
     total_reference_tokens = 0
     total_hypothesis_tokens = 0
@@ -88,17 +96,39 @@ def _calculate_error_rate_for_lines(
         rate = 0.0 if total_hypothesis_tokens == 0 else 1.0
     else:
         rate = total_counts.total_errors / total_reference_tokens
-    return rate, total_counts
+    return ErrorRateResult(
+        rate=rate,
+        counts=total_counts,
+        reference_tokens=total_reference_tokens,
+        hypothesis_tokens=total_hypothesis_tokens,
+    )
 
 
 def calculate_wer(reference: str, hypothesis: str) -> Tuple[float, EditCounts]:
     """Compute WER and edit counts for word-level tokens."""
-    return _calculate_error_rate_for_lines([reference], [hypothesis], lambda s: s.split())
+    result = _calculate_error_rate_for_lines([reference], [hypothesis], lambda s: s.split())
+    return result.rate, result.counts
 
 
 def calculate_cer(reference: str, hypothesis: str) -> Tuple[float, EditCounts]:
     """Compute CER and edit counts for character-level tokens."""
-    return _calculate_error_rate_for_lines([reference], [hypothesis], list)
+    result = _calculate_error_rate_for_lines([reference], [hypothesis], list)
+    return result.rate, result.counts
+
+
+def _format_formula(label: str, result: ErrorRateResult) -> str:
+    if result.reference_tokens == 0:
+        return (
+            f"{label} formula: reference has zero tokens, so the error rate is "
+            f"{result.rate:.3f} by definition."
+        )
+    return (
+        f"{label} = (S + D + I) / N = ("
+        f"{result.counts.substitutions} + "
+        f"{result.counts.deletions} + "
+        f"{result.counts.insertions}) / "
+        f"{result.reference_tokens} = {result.rate:.3f}"
+    )
 
 
 def _read_lines(value: str) -> List[str]:
@@ -118,6 +148,11 @@ def main(args: Iterable[str] | None = None) -> None:
         "hypothesis",
         help="Hypothesis text or @path to file containing the text.",
     )
+    parser.add_argument(
+        "--show-formula",
+        action="store_true",
+        help="Show the error-rate formula using the computed counts.",
+    )
     parsed = parser.parse_args(args=args)
 
     reference_lines = _read_lines(parsed.reference)
@@ -128,25 +163,29 @@ def main(args: Iterable[str] | None = None) -> None:
             "Reference and hypothesis must contain the same number of lines"
         )
 
-    wer, wer_counts = _calculate_error_rate_for_lines(
+    wer_result = _calculate_error_rate_for_lines(
         reference_lines, hypothesis_lines, lambda s: s.split()
     )
-    cer, cer_counts = _calculate_error_rate_for_lines(reference_lines, hypothesis_lines, list)
+    cer_result = _calculate_error_rate_for_lines(reference_lines, hypothesis_lines, list)
 
     reference_text = "\n".join(reference_lines)
     hypothesis_text = "\n".join(hypothesis_lines)
 
     print("Reference:", reference_text)
     print("Hypothesis:", hypothesis_text)
-    print("\nWER: {:.3f}".format(wer))
-    print("  Substitutions: {}".format(wer_counts.substitutions))
-    print("  Deletions: {}".format(wer_counts.deletions))
-    print("  Insertions: {}".format(wer_counts.insertions))
+    print("\nWER: {:.3f}".format(wer_result.rate))
+    print("  Substitutions: {}".format(wer_result.counts.substitutions))
+    print("  Deletions: {}".format(wer_result.counts.deletions))
+    print("  Insertions: {}".format(wer_result.counts.insertions))
+    if parsed.show_formula:
+        print("  " + _format_formula("WER", wer_result))
 
-    print("\nCER: {:.3f}".format(cer))
-    print("  Substitutions: {}".format(cer_counts.substitutions))
-    print("  Deletions: {}".format(cer_counts.deletions))
-    print("  Insertions: {}".format(cer_counts.insertions))
+    print("\nCER: {:.3f}".format(cer_result.rate))
+    print("  Substitutions: {}".format(cer_result.counts.substitutions))
+    print("  Deletions: {}".format(cer_result.counts.deletions))
+    print("  Insertions: {}".format(cer_result.counts.insertions))
+    if parsed.show_formula:
+        print("  " + _format_formula("CER", cer_result))
 
 
 if __name__ == "__main__":
