@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import re
 from typing import Iterable, List, Sequence, Tuple
 
 from jiwer import cer, measures as jiwer_measures, wer
@@ -21,10 +22,6 @@ class EditCounts:
     insertions: int
     deletions: int
 
-    @property
-    def total_errors(self) -> int:
-        return self.substitutions + self.insertions + self.deletions
-
 
 @dataclass
 class ErrorRateResult:
@@ -32,6 +29,51 @@ class ErrorRateResult:
     counts: EditCounts
     reference_tokens: int
     hypothesis_tokens: int
+
+
+_JP_CHAR_PATTERN = re.compile(r"[?-??-??-?????]")
+_mecab_tagger = None
+
+
+def _should_use_mecab(texts: Sequence[str]) -> bool:
+    return any(_JP_CHAR_PATTERN.search(t) for t in texts)
+
+
+def _get_mecab_tagger():
+    global _mecab_tagger
+    if _mecab_tagger is None:
+        try:
+            import MeCab
+        except ImportError as exc:
+            raise RuntimeError(
+                "MeCab is required for Japanese tokenization. "
+                "Install mecab-python3 or ensure MeCab is available."
+            ) from exc
+        try:
+            _mecab_tagger = MeCab.Tagger("-Owakati")
+        except RuntimeError:
+            try:
+                import unidic_lite
+            except ImportError as exc:
+                raise RuntimeError(
+                    "MeCab dictionary not found. Install unidic-lite or set MECABRC/dictionary path."
+                ) from exc
+            dic_dir = getattr(unidic_lite, "DICDIR", None)
+            if not dic_dir:
+                raise RuntimeError(
+                    "Could not locate unidic-lite dictionary. Try reinstalling unidic-lite."
+                )
+            _mecab_tagger = MeCab.Tagger(f"-Owakati -d {dic_dir}")
+    return _mecab_tagger
+
+
+def _tokenize_japanese(lines: Sequence[str]) -> List[str]:
+    tagger = _get_mecab_tagger()
+    tokenized: List[str] = []
+    for line in lines:
+        parsed = tagger.parse(line)
+        tokenized.append(parsed.strip() if parsed is not None else "")
+    return tokenized
 
 
 def _calculate_error_rate_for_lines(
@@ -119,12 +161,20 @@ def main(args: Iterable[str] | None = None) -> None:
     hypothesis_lines = _read_lines(parsed.hypothesis)
 
     if len(reference_lines) != len(hypothesis_lines):
-        raise ValueError(
-            "Reference and hypothesis must contain the same number of lines"
-        )
+        max_len = max(len(reference_lines), len(hypothesis_lines))
+        reference_lines = list(reference_lines) + [""] * (max_len - len(reference_lines))
+        hypothesis_lines = list(hypothesis_lines) + [""] * (max_len - len(hypothesis_lines))
+
+    use_mecab = _should_use_mecab(reference_lines + hypothesis_lines)
+    word_reference_lines = (
+        _tokenize_japanese(reference_lines) if use_mecab else reference_lines
+    )
+    word_hypothesis_lines = (
+        _tokenize_japanese(hypothesis_lines) if use_mecab else hypothesis_lines
+    )
 
     wer_result = _calculate_error_rate_for_lines(
-        reference_lines, hypothesis_lines, "word"
+        word_reference_lines, word_hypothesis_lines, "word"
     )
     cer_result = _calculate_error_rate_for_lines(reference_lines, hypothesis_lines, "char")
 
