@@ -9,6 +9,11 @@ Run the script with two arguments: the reference text and the hypothesis text. P
 ```bash
 python compute_error_rates.py "これは ペン です" "これは ペン"
 python compute_error_rates.py @reference.txt @hypothesis.txt
+python compute_error_rates.py "今日は いい 天気 ですね" "今日は いい 天気 です" --show-formula
 ```
 
 The output includes both WER and CER along with the counts for substitutions, deletions, and insertions.
+Add the `--show-formula` flag to print the calculation steps, which is useful if you want to verify a
+specific formula such as ``WER = (S + I + D) / N``. For the Japanese example above, the command will
+report that substituting “ですね” with “です” gives a single substitution over four reference words,
+leading to a WER of 0.25 (25%).
