@@ -4,7 +4,7 @@ This repository provides a simple Python script to compute Word Error Rate (WER)
 
 ## Usage
 
-Run the script with two arguments: the reference text and the hypothesis text. Prefix an argument with `@` to load the text from a file.
+Run the script with two arguments: the reference text and the hypothesis text. Prefix an argument with `@` to load the text from a file. When files are used, each line is paired by position so multi-line inputs are fully evaluated.
 
 ```bash
 python compute_error_rates.py "これは ペン です" "これは ペン"
