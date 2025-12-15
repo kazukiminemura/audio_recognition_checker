@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-from typing import Callable, Iterable, List, Sequence, Tuple
+from typing import Iterable, List, Sequence, Tuple
+
+from jiwer import measures as jiwer_measures
 
 
 @dataclass
@@ -32,87 +34,45 @@ class ErrorRateResult:
     hypothesis_tokens: int
 
 
-def _add_counts(counts: EditCounts, update: Tuple[int, int, int]) -> EditCounts:
-    sub, ins, delete = update
-    return EditCounts(
-        substitutions=counts.substitutions + sub,
-        insertions=counts.insertions + ins,
-        deletions=counts.deletions + delete,
-    )
-
-
-def _edit_distance(reference: Sequence[str], hypothesis: Sequence[str]) -> EditCounts:
-    """Return edit counts (S, I, D) between two token sequences."""
-
-    ref_len, hyp_len = len(reference), len(hypothesis)
-    dp: List[List[EditCounts]] = [
-        [EditCounts(0, j, 0) for j in range(hyp_len + 1)]
-    ]
-    for i in range(1, ref_len + 1):
-        row = [EditCounts(0, 0, i)]
-        row.extend(EditCounts(0, 0, i) for _ in range(hyp_len))
-        dp.append(row)
-
-    for i in range(1, ref_len + 1):
-        for j in range(1, hyp_len + 1):
-            if reference[i - 1] == hypothesis[j - 1]:
-                dp[i][j] = dp[i - 1][j - 1]
-                continue
-
-            substitution = _add_counts(dp[i - 1][j - 1], (1, 0, 0))
-            insertion = _add_counts(dp[i][j - 1], (0, 1, 0))
-            deletion = _add_counts(dp[i - 1][j], (0, 0, 1))
-
-            candidates = [substitution, insertion, deletion]
-            dp[i][j] = min(
-                candidates,
-                key=lambda c: (c.total_errors, c.substitutions, c.insertions, c.deletions),
-            )
-
-    return dp[ref_len][hyp_len]
-
-
 def _calculate_error_rate_for_lines(
     references: Sequence[str],
     hypotheses: Sequence[str],
-    tokenizer: Callable[[str], Sequence[str]],
+    mode: str,
 ) -> ErrorRateResult:
-    total_counts = EditCounts(0, 0, 0)
-    total_reference_tokens = 0
-    total_hypothesis_tokens = 0
-
-    for reference, hypothesis in zip(references, hypotheses):
-        reference_tokens = tokenizer(reference)
-        hypothesis_tokens = tokenizer(hypothesis)
-        counts = _edit_distance(reference_tokens, hypothesis_tokens)
-        total_counts = _add_counts(
-            total_counts,
-            (counts.substitutions, counts.insertions, counts.deletions),
-        )
-        total_reference_tokens += len(reference_tokens)
-        total_hypothesis_tokens += len(hypothesis_tokens)
-
-    if total_reference_tokens == 0:
-        rate = 0.0 if total_hypothesis_tokens == 0 else 1.0
+    if mode == "word":
+        output = jiwer_measures.process_words(references, hypotheses)
+        rate = output.wer
+    elif mode == "char":
+        output = jiwer_measures.process_characters(references, hypotheses)
+        rate = output.cer
     else:
-        rate = total_counts.total_errors / total_reference_tokens
+        raise ValueError(f"Unsupported mode: {mode}")
+
+    reference_tokens = output.hits + output.substitutions + output.deletions
+    hypothesis_tokens = output.hits + output.substitutions + output.insertions
+    counts = EditCounts(
+        substitutions=output.substitutions,
+        insertions=output.insertions,
+        deletions=output.deletions,
+    )
+
     return ErrorRateResult(
         rate=rate,
-        counts=total_counts,
-        reference_tokens=total_reference_tokens,
-        hypothesis_tokens=total_hypothesis_tokens,
+        counts=counts,
+        reference_tokens=reference_tokens,
+        hypothesis_tokens=hypothesis_tokens,
     )
 
 
 def calculate_wer(reference: str, hypothesis: str) -> Tuple[float, EditCounts]:
-    """Compute WER and edit counts for word-level tokens."""
-    result = _calculate_error_rate_for_lines([reference], [hypothesis], lambda s: s.split())
+    """Compute WER and edit counts using jiwer at the word level."""
+    result = _calculate_error_rate_for_lines([reference], [hypothesis], "word")
     return result.rate, result.counts
 
 
 def calculate_cer(reference: str, hypothesis: str) -> Tuple[float, EditCounts]:
-    """Compute CER and edit counts for character-level tokens."""
-    result = _calculate_error_rate_for_lines([reference], [hypothesis], list)
+    """Compute CER and edit counts using jiwer at the character level."""
+    result = _calculate_error_rate_for_lines([reference], [hypothesis], "char")
     return result.rate, result.counts
 
 
@@ -164,9 +124,9 @@ def main(args: Iterable[str] | None = None) -> None:
         )
 
     wer_result = _calculate_error_rate_for_lines(
-        reference_lines, hypothesis_lines, lambda s: s.split()
+        reference_lines, hypothesis_lines, "word"
     )
-    cer_result = _calculate_error_rate_for_lines(reference_lines, hypothesis_lines, list)
+    cer_result = _calculate_error_rate_for_lines(reference_lines, hypothesis_lines, "char")
 
     reference_text = "\n".join(reference_lines)
     hypothesis_text = "\n".join(hypothesis_lines)
